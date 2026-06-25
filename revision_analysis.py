@@ -206,7 +206,6 @@ def _agg(rec, store, prefix):
         rec[f'mean_{tag}'] = a.mean(); rec[f'std_{tag}'] = a.std()
         rec[f'min_{tag}']  = a.min();  rec[f'max_{tag}'] = a.max()
  
- 
 # ══════════════════════════════════════════════════════════════════════════════
 # PRIMARY ANALYSIS  (binarized)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -548,6 +547,54 @@ if __name__ == "__main__":
     # secondary_df, secondary_by_pair = execute_secondary(dfo, embed_dict)
     
     # res_summary = summarize_primary(primary_df)
+#%%
+"""
+Fit the FINAL LR-all converter for deployment.
+For each output item, train LogisticRegression on ALL source item scores using the
+FULL dataset (same binarize + SMOTE as evaluation), then pickle the list of models.
+Stores actual sklearn models so the app uses the standard model.predict().
+Artifact is only a few KB (logistic models are just coefficients).
+Needs in scope: binarize_target, _binaryclass_smote, _complete_case, dfo, item lists.
+"""
+ 
+def fit_converter(dfo, source_items, target_items, use_smote=True):
+    """Train one LogisticRegression per output item on ALL source items (full data).
+    Returns (models, kept_target_items, source_items)."""
+    ss = dfo[source_items]
+    models, kept = [], []
+    for target_col in target_items:
+        cc = _complete_case(ss, dfo[target_col].values)
+        if cc is None:
+            continue
+        Xs, y_raw, _ = cc
+        y_bin = binarize_target(y_raw.values)
+        if len(np.unique(y_bin)) < 2:
+            continue
+        X, y = Xs.values, y_bin
+        if use_smote:
+            X, y, _ = _binaryclass_smote(X, y)
+            X, y = np.asarray(X), np.asarray(y)
+        models.append(LogisticRegression(max_iter=1000).fit(X, y))
+        kept.append(target_col)
+    return models, kept, list(source_items)
+ 
+ 
+def save_converter(path, models, target_items, source_items):
+    with open(path, "wb") as f:
+        pkl.dump({"models": models,
+                     "target_items": target_items,
+                     "source_items": source_items}, f)
+ 
+ 
+# if __name__ == "__main__":
+# child version: HBI <-> M-PCSI
+m1, t1, s1 = fit_converter(dfo, HBI_c_items, MPCS_c_items)
+save_converter("HBI-PCSI_lrall.pkl", m1, t1, s1)
+ 
+m2, t2, s2 = fit_converter(dfo, MPCS_c_items, HBI_c_items)
+save_converter("PCSI-HBI_lrall.pkl", m2, t2, s2)
+ 
+print("saved HBI-PCSI_lrall.pkl and PCSI-HBI_lrall.pkl")
 #%%
 # Table 1
 df = dfo.copy()
