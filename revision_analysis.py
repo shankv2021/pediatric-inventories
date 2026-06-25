@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 from collections import Counter
 import pickle as pkl
 import mord
-from sklearn.metrics import balanced_accuracy_score, cohen_kappa_score, mean_absolute_error,roc_auc_score
+from sklearn.metrics import balanced_accuracy_score, cohen_kappa_score, mean_absolute_error,roc_auc_score, accuracy_score
 from scipy.stats import spearmanr
 import warnings
 from sklearn.linear_model import LogisticRegression
@@ -64,47 +64,37 @@ df['sexgender'] = (df['sex'].astype(str) + df['gender'].astype(str)).replace(
 # correction for item 15 bad data for children
 # df['MPCSc15'] = df['MPCSp15']
 
-# HBI child items names, HBIc01, HBIc02...
-HBI_c_items = ['HBIc' + str(i).zfill(2) for i in np.arange(1,21)]
+# Fix the index FIRST — this is what caused the iloc/loc inflation.
+df = df.reset_index(drop=True)
 
-# HBI parent items names, HBIc01, HBIc02...
-HBI_p_items = ['HBIp' + str(i).zfill(2) for i in np.arange(1,21)]
+# ── Item name lists ───────────────────────────────────────────────────────────
+HBI_c_items  = [f'HBIc{i:02d}'  for i in range(1, 21)]   # HBI child  (20 items)
+HBI_p_items  = [f'HBIp{i:02d}'  for i in range(1, 21)]   # HBI parent (20 items)
+MPCS_c_items = [f'MPCSc{i:02d}' for i in range(1, 16)]   # M-PCSI child  (15 items)
+MPCS_p_items = [f'MPCSp{i:02d}' for i in range(1, 16)]   # M-PCSI parent (15 items)
 
-# PCSI parent items names, HBIc01, HBIc02... PRE = before the injury
-MPCS_c_items = ['MPCSc' + str(i).zfill(2) for i in np.arange(1,16)]
+# ── Feature sums (each sum uses its OWN items — the swap is fixed) ─────────────
+ITEM_GROUPS = {
+    'HBIc_sum':  HBI_c_items,
+    'HBIp_sum':  HBI_p_items,
+    'MPCSc_sum': MPCS_c_items,
+    'MPCSp_sum': MPCS_p_items,
+}
+score_sum_vars = list(ITEM_GROUPS)
+for name, cols in ITEM_GROUPS.items():
+    df[name] = df[cols].sum(axis=1)
 
-# PCSI parent items names, HBIc01, HBIc02... POST = (yesterday/today)
-MPCS_p_items = ['MPCSp' + str(i).zfill(2) for i in np.arange(1,16)]
+# ── "Usable" masks: at most 1 missing item per required block ─────────────────
+def few_missing(cols):
+    return df[cols].isnull().sum(axis=1) <= 1
 
-# create feature sums
-df['HBIp_sum'] = df[HBI_p_items].sum(axis=1)
-df['HBIc_sum'] = df[HBI_c_items].sum(axis=1)
-df['MPCSp_sum'] = df[MPCS_c_items].sum(axis=1)
-df['MPCSc_sum'] = df[MPCS_p_items].sum(axis=1)
+hbi_ok  = few_missing(HBI_p_items)  & few_missing(HBI_c_items)
+mpcs_ok = few_missing(MPCS_p_items) & few_missing(MPCS_c_items)
 
-score_sum_vars = ['HBIp_sum', 'HBIc_sum', 'MPCSp_sum', 'MPCSc_sum']
-
-# pd.Series(df[HBI_c_items].values.flatten()).describe()
-
-HBI_indices = df[((df[HBI_p_items].isnull().sum(axis=1)<=1) & (df[HBI_c_items].isnull().sum(axis=1)<=1))].index
-
-MPCS_indices = df[((df[MPCS_p_items].isnull().sum(axis=1)<=1) & (df[MPCS_c_items].isnull().sum(axis=1)<=1))].index
-
-overlap_indices = df[((df[MPCS_p_items].isnull().sum(axis=1)<=1) & (df[HBI_p_items].isnull().sum(axis=1)<=1)) & (
-    df[HBI_c_items].isnull().sum(axis=1)<=1) & (df[MPCS_c_items].isnull().sum(axis=1)<=1)].index
-
-df_HBI = df.iloc[HBI_indices].drop_duplicates(subset='subject_ID', keep="first")
-df_MPCS = df.iloc[MPCS_indices].drop_duplicates(subset='subject_ID', keep="first")
-df_ov = df.iloc[overlap_indices].drop_duplicates(subset='subject_ID', keep="first")
-
-# create a df overlap dataframe
-dfo = df.iloc[overlap_indices].copy()
-
-
-over = SMOTE(sampling_strategy=0.1) # oversample the minority to 10% of the majority class
-steps = [('o', over)]
-pipeline = Pipeline(steps=steps)
-
+# ── Selection by boolean mask (cannot double-count, index-safe) ───────────────
+df_HBI  = df[hbi_ok].drop_duplicates('subject_ID', keep='first')
+df_MPCS = df[mpcs_ok].drop_duplicates('subject_ID', keep='first')
+dfo     = df[hbi_ok & mpcs_ok].drop_duplicates('subject_ID', keep='first').copy()
 
 #%%
 
@@ -119,7 +109,8 @@ warnings.filterwarnings("ignore", message=".*sklearn.utils.parallel.delayed.*")
 # ── Shared config ─────────────────────────────────────────────────────────────
 MODEL_NAME         = 'all-mpnet-base-v2'
 NUM_TRIES          = 10
-TRAIN_SIZES        = [0.50, 0.60, 0.70, 0.80, 0.90]
+# TRAIN_SIZES        = [0.50, 0.60, 0.70, 0.80, 0.90]#
+TRAIN_SIZES        = [0.70]
 N_ESTIMATORS       = 500
 SMOTE_FLOOR        = 100
 USE_SMOTE          = True
@@ -231,7 +222,7 @@ def _primary_item(item_idx, target_col, source_features, source_scores,
  
     # SMOTE the raw source scores against the BINARY target
     if use_smote:
-        # Xb, yb, did = _multiclass_smote(Xs.values, y_bin)
+        # Xb, yb, did = _multiclass_smote(Xs.values, y_bin)   # multiclass floor variant
         Xb, yb, did = _binaryclass_smote(Xs.values, y_bin)      # original binarized logic (98 * 2.5)
         Xb, yb = np.asarray(Xb), np.asarray(yb)
     else:
@@ -240,44 +231,73 @@ def _primary_item(item_idx, target_col, source_features, source_scores,
     # logistic features: n most-similar source items (raw scores)
     sel_idx = select_similar_items(source_features, target_emb, N_SIMILAR_FEATURES)
     X_sim   = Xb[:, sel_idx]
-    # RF features: combined = raw + item_sum + PCA(weighted)
+    # RF features:
+    #   X_comb = raw + item_sum + PCA(weighted)   -> rf      (weighted-feature model)
+    #   X_raw  = raw scores only                  -> rf_raw  (ablation: no weighted feats)
     weighted = weight_features(source_features, Xb)
     comb     = np.concatenate([weighted * target_emb[np.newaxis, :], weighted], axis=1)
     emb_pca  = PCA(n_components=N_PCA_COMPONENTS).fit_transform(comb)
     X_comb   = np.concatenate([Xb, Xb.sum(1, keepdims=True), emb_pca], axis=1)
+    X_raw    = Xb
  
     out = []
     for train_size in train_sizes:
         ts = 1.0 - train_size
-        M = {'logit': {'bal_acc': [], 'qwk': [], 'roc_auc': []},
-             'rf':    {'bal_acc': [], 'qwk': [], 'roc_auc': []}}
+        M = {'logit':  {'acc': [], 'bal_acc': [], 'qwk': [], 'roc_auc': []},
+             'logit_all':  {'acc': [], 'bal_acc': [], 'qwk': [], 'roc_auc': []},
+             'rf':     {'acc': [], 'bal_acc': [], 'qwk': [], 'roc_auc': []},
+             'rf_raw': {'acc': [], 'bal_acc': [], 'qwk': [], 'roc_auc': []}}
         for t in range(num_tries):
             seed = (item_idx + 1) * (t + 1) * int(train_size * 100)
             strat = yb if min(Counter(yb).values()) >= 2 else None
-            itr, ite = train_test_split(np.arange(len(yb)), test_size=ts,
-                                        random_state=seed, stratify=strat)
+            itr, ite = train_test_split(np.arange(len(yb)),
+                                        test_size=ts,
+                                        random_state=seed, 
+                                        stratify=strat)
             ytr, yte = yb[itr], yb[ite]
             two_classes = len(np.unique(yte)) == 2
+            
+            lr = LogisticRegression(max_iter=1000).fit(X_raw[itr], ytr)
+            ypl = lr.predict(X_raw[ite])
+            M['logit_all']['acc'].append(accuracy_score(yte, ypl))
+            M['logit_all']['bal_acc'].append(balanced_accuracy_score(yte, ypl))
+            M['logit_all']['qwk'].append(cohen_kappa_score(yte, ypl, labels=[0, 1], weights='quadratic'))
+            if two_classes:
+                M['logit_all']['roc_auc'].append(roc_auc_score(yte, lr.predict_proba(X_raw[ite])[:, 1]))
  
-            lr = LogisticRegression().fit(X_sim[itr], ytr)
+            lr = LogisticRegression(max_iter=1000).fit(X_sim[itr], ytr)
             ypl = lr.predict(X_sim[ite])
+            M['logit']['acc'].append(accuracy_score(yte, ypl))
             M['logit']['bal_acc'].append(balanced_accuracy_score(yte, ypl))
             M['logit']['qwk'].append(cohen_kappa_score(yte, ypl, labels=[0, 1], weights='quadratic'))
             if two_classes:
                 M['logit']['roc_auc'].append(roc_auc_score(yte, lr.predict_proba(X_sim[ite])[:, 1]))
  
+            # RF with weighted features
             rf = _make_rf(seed).fit(X_comb[itr], ytr)
             ypr = rf.predict(X_comb[ite])
+            M['rf']['acc'].append(accuracy_score(yte, ypr))
             M['rf']['bal_acc'].append(balanced_accuracy_score(yte, ypr))
             M['rf']['qwk'].append(cohen_kappa_score(yte, ypr, labels=[0, 1], weights='quadratic'))
             if two_classes:
                 M['rf']['roc_auc'].append(roc_auc_score(yte, rf.predict_proba(X_comb[ite])[:, 1]))
  
+            # RF ablation: raw scores only (same target, same split, same SMOTE)
+            rfr = _make_rf(seed).fit(X_raw[itr], ytr)
+            yprr = rfr.predict(X_raw[ite])
+            M['rf_raw']['acc'].append(accuracy_score(yte, yprr))
+            M['rf_raw']['bal_acc'].append(balanced_accuracy_score(yte, yprr))
+            M['rf_raw']['qwk'].append(cohen_kappa_score(yte, yprr, labels=[0, 1], weights='quadratic'))
+            if two_classes:
+                M['rf_raw']['roc_auc'].append(roc_auc_score(yte, rfr.predict_proba(X_raw[ite])[:, 1]))
+ 
         rec = {'target_item': target_col, 'item_idx': item_idx, 'train_size': train_size,
                'n_used': int(mask.sum()), 'pct_ones': float(y_bin.mean()),
                'sim_items': ",".join(map(str, Xs.columns[sel_idx]))}
-        _agg(rec, M['logit'], 'logit')
-        _agg(rec, M['rf'],    'rf')
+        _agg(rec, M['logit'],  'logit')        
+        _agg(rec, M['logit_all'],  'logit_all')
+        _agg(rec, M['rf'],     'rf')
+        _agg(rec, M['rf_raw'], 'rf_raw')
         out.append(rec)
     return out, int(did)
  
@@ -296,15 +316,15 @@ def run_primary_analysis(dfo, source_name, source_items, target_name, target_ite
         recs.extend(r); imb += d
     return pd.DataFrame(recs), imb
  
- 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECONDARY ANALYSIS  (ordinal 0-3, raw features)
 # ══════════════════════════════════════════════════════════════════════════════
 def _binary_collapse(clf, Xte, y_te):
-    """Collapse a 0-3 classifier's output to the 0/1 task. Returns (bacc, qwk, roc)."""
+    """Collapse a 0-3 classifier's output to the 0/1 task. Returns (acc, bacc, qwk, roc)."""
     yp = clf.predict(Xte)
     ybt = (y_te > BINARIZE_THRESHOLD).astype(int)
     ybp = (yp   > BINARIZE_THRESHOLD).astype(int)
+    acc  = accuracy_score(ybt, ybp)
     bacc = balanced_accuracy_score(ybt, ybp)
     qwk  = cohen_kappa_score(ybt, ybp, labels=[0, 1], weights='quadratic')
     roc  = np.nan
@@ -313,7 +333,7 @@ def _binary_collapse(clf, Xte, y_te):
         cols = [k for k, c in enumerate(clf.classes_) if c > BINARIZE_THRESHOLD]
         if cols:
             roc = roc_auc_score(ybt, proba[:, cols].sum(axis=1))
-    return yp, bacc, qwk, roc
+    return yp, acc, bacc, qwk, roc
  
  
 def _secondary_item(item_idx, target_col, source_scores, tcv,
@@ -336,7 +356,8 @@ def _secondary_item(item_idx, target_col, source_scores, tcv,
     out = []
     for train_size in train_sizes:
         ts = 1.0 - train_size
-        M = {m: {'bal_acc': [], 'qwk': [], 'balacc_bin': [], 'qwk_bin': [], 'roc_bin': []}
+        M = {m: {'acc': [], 'bal_acc': [], 'qwk': [],
+                 'acc_bin': [], 'balacc_bin': [], 'qwk_bin': [], 'roc_bin': []}
              for m in ('ord', 'rf')}
         for t in range(num_tries):
             seed = (item_idx + 1) * (t + 1) * int(train_size * 100)
@@ -348,10 +369,12 @@ def _secondary_item(item_idx, target_col, source_scores, tcv,
             for name, clf in (('ord', mord.LogisticAT(alpha=ORDINAL_ALPHA)),
                               ('rf',  _make_rf(seed))):
                 clf.fit(Xb[itr], ytr)
-                yp, bacc, qwk_b, roc_b = _binary_collapse(clf, Xb[ite], yte)
+                yp, acc_b, bacc, qwk_b, roc_b = _binary_collapse(clf, Xb[ite], yte)
+                M[name]['acc'].append(accuracy_score(yte, yp))
                 M[name]['bal_acc'].append(balanced_accuracy_score(yte, yp))
                 M[name]['qwk'].append(cohen_kappa_score(
                     yte, yp, labels=ORDINAL_LABELS, weights='quadratic'))
+                M[name]['acc_bin'].append(acc_b)
                 M[name]['balacc_bin'].append(bacc)
                 M[name]['qwk_bin'].append(qwk_b)
                 M[name]['roc_bin'].append(roc_b)
@@ -387,6 +410,9 @@ def _load_pairs():
  
  
 def execute_primary(dfo, embed_dict, verbose=True):
+    """Run primary on all pairs. Returns one tidy DataFrame (with a `pair` column)
+    of mean/std/min/max-across-attempts metrics for every (pair, target_item,
+    train_size). Also returns the per-pair dict."""
     pairs, frames, per_pair, smote_rows = _load_pairs(), [], {}, []
     for (sn, si), (tn, ti) in pairs:
         key = f'{sn}-{tn}'
@@ -400,15 +426,35 @@ def execute_primary(dfo, embed_dict, verbose=True):
         if verbose:
             m = df_res.mean(numeric_only=True) if not df_res.empty else {}
             print(f"[PRIMARY] {key}  "
-                  f"bal_acc  logit={m.get('mean_bal_acc_logit', float('nan')):.3f} "
-                  f"rf={m.get('mean_bal_acc_rf', float('nan')):.3f}  |  "
-                  f"ROC-AUC  logit={m.get('mean_roc_auc_logit', float('nan')):.3f} "
-                  f"rf={m.get('mean_roc_auc_rf', float('nan')):.3f}  |  "
-                  f"SMOTE {n_smote}/{len(ti)} target items")
+                  "Mean of acc"
+                  
+                  f"acc logit={m.get('mean_acc_logit', float('nan')):.3f} "
+                  f"logit_all={m.get('mean_acc_logit_all', float('nan')):.3f} "
+                  f"rf={m.get('mean_acc_rf', float('nan')):.3f} "
+                  f"rf_raw={m.get('mean_acc_rf_raw', float('nan')):.3f}  |  "
+                  
+                  "Std of acc"
+                  
+                  f"acc logit={m.get('std_acc_logit', float('nan')):.3f} "
+                  f"logit_all={m.get('std_acc_logit_all', float('nan')):.3f} "
+                  f"rf={m.get('std_acc_rf', float('nan')):.3f} "
+                  f"rf_raw={m.get('std_acc_rf_raw', float('nan')):.3f}  |  "
+                  
+                  "Mean of bal acc"
+                  
+                  f"bal_acc logit={m.get('mean_bal_acc_logit', float('nan')):.3f} "
+                  f"logit_all={m.get('mean_bal_acc_logit_all', float('nan')):.3f} "
+                  f"rf={m.get('mean_bal_acc_rf', float('nan')):.3f} "
+                  f"rf_raw={m.get('mean_bal_acc_rf_raw', float('nan')):.3f}"
+            
+                  "Std of bal acc"
+                  f"acc logit={m.get('std_bal_acc_logit', float('nan')):.3f} "
+                  f"logit_all={m.get('std_bal_acc_logit_all', float('nan')):.3f} "
+                  f"rf={m.get('std_bal_acc_rf', float('nan')):.3f} "
+                  f"rf_raw={m.get('std_bal_acc_rf_raw', float('nan')):.3f}  |  ")
     tidy = pd.concat([f for f in frames if not f.empty], ignore_index=True)
     smote_summary = pd.DataFrame(smote_rows)
     return tidy, per_pair, smote_summary
- 
  
 def execute_secondary(dfo, embed_dict, verbose=True):
     """Run secondary on all pairs (skips non-ordinal MPCS targets). Returns one
@@ -435,7 +481,7 @@ def execute_secondary(dfo, embed_dict, verbose=True):
     non_empty = [f for f in frames if not f.empty]
     tidy = pd.concat(non_empty, ignore_index=True) if non_empty else pd.DataFrame()
     return tidy, per_pair
- 
+
 TRAIN_SIZES = [0.50, 0.60, 0.70, 0.80, 0.90]
  
 LABELS = {'HBI_c': 'HBI child', 'HBI_p': 'HBI parent',
@@ -454,8 +500,10 @@ def _cell(vals):
         return "—"
     return f"{v.mean():.1f} ({v.std():.1f})"
 
-def summarize_primary(primary_df, train_sizes=TRAIN_SIZES):
-    """Aggregate per-item balanced accuracies into one row per conversion."""
+def summarize_primary(primary_df, train_sizes=TRAIN_SIZES, metric="bal_acc"):
+    """Aggregate per-item primary results into one row per conversion.
+    metric: which per-item column family to summarize ('bal_acc' or 'acc').
+    Emits LR, RF (weighted), and RF_raw (ablation) cells per train size."""
     rows = []
     for group, convs in [("Within-reporter", WITHIN), ("Cross-reporter", CROSS)]:
         for src, tgt in convs:
@@ -464,22 +512,45 @@ def summarize_primary(primary_df, train_sizes=TRAIN_SIZES):
             row = {"group": group, "source": LABELS[src], "target": LABELS[tgt], "STS": ""}
             for ts in train_sizes:
                 sub = dfp[np.isclose(dfp["train_size"], ts)]
-                row[f"LR_{int(ts*100)}"] = _cell(sub["mean_bal_acc_logit"])
-                row[f"RF_{int(ts*100)}"] = _cell(sub["mean_bal_acc_rf"])
+                p = int(ts * 100)
+                row[f"LR_{p}"]     = _cell(sub[f"mean_{metric}_logit"])
+                row[f"LR_all_{p}"]     = _cell(sub[f"mean_{metric}_logit_all"])
+                row[f"RF_{p}"]     = _cell(sub[f"mean_{metric}_rf"])
+                row[f"RF_raw_{p}"] = _cell(sub[f"mean_{metric}_rf_raw"])
             rows.append(row)
     return pd.DataFrame(rows)
  
+from scipy import stats
+ORDER  = WITHIN + CROSS
+
+def welch_lr_all(primary_df):
+    """One-sided Welch test: is LR_all > pooled (LR sim + RF wtd + RF raw)?
+    Run separately for accuracy and balanced accuracy."""
+    def pair_mean(s, t, col):
+        return primary_df[primary_df['pair'] == f'{s}-{t}'][col].mean() * 100
+
+    for metric, label in [('acc', 'Accuracy'), ('bal_acc', 'Balanced accuracy')]:
+        g1 = np.array([pair_mean(s, t, f'mean_{metric}_logit_all') for s, t in ORDER])      # 8 LR all
+        g2 = np.concatenate([[pair_mean(s, t, f'mean_{metric}_{m}') for s, t in ORDER]
+                             for m in ('logit', 'rf', 'rf_raw')])                            # 24 others
+        t_stat, p_two = stats.ttest_ind(g1, g2, equal_var=False)        # Welch
+        p_one = p_two / 2 if t_stat > 0 else 1 - p_two / 2              # one-sided: g1 > g2
+        print(f"{label}: LR_all mean={g1.mean():.2f} (n={len(g1)}) vs "
+              f"others mean={g2.mean():.2f} (n={len(g2)}) | "
+              f"Welch t={t_stat:.3f}, one-sided p={p_one:.4f} "
+              f"({'significant' if p_one < 0.05 else 'n.s.'} at .05)")
+        
 if __name__ == "__main__":
     embed_dict = load_pickle(f"./embed_dict_models/embed_dict_{_safe_ext(MODEL_NAME)}.p")
  
     # ---- run whichever you need; they are fully independent ----
-    # primary_df,   primary_by_pair, primary_smote   = execute_primary(dfo, embed_dict)
-    secondary_df, secondary_by_pair = execute_secondary(dfo, embed_dict)
+    primary_df,   primary_by_pair, primary_smote   = execute_primary(dfo, embed_dict)
+    # secondary_df, secondary_by_pair = execute_secondary(dfo, embed_dict)
     
     # res_summary = summarize_primary(primary_df)
 #%%
 # Table 1
-df = df_ov.copy()
+df = dfo.copy()
 TOTAL = len(df)
 def harmonize_sex(row):
     s, g = row["sex"], row["gender"]
@@ -559,12 +630,12 @@ result.index.name = "Characteristic"
 #%%
 
 # Count NaNs
-N = len(df_ov)
+N = len(dfo)
 # ── Column groups ────────────────────────────────────────────────────────────
-hbi_child_items  = [c for c in df_ov.columns if c.startswith('HBIc') and 'sum' not in c]
-hbi_parent_items = [c for c in df_ov.columns if c.startswith('HBIp') and 'sum' not in c]
-mpcs_child_items = [c for c in df_ov.columns if c.startswith('MPCSc') and 'sum' not in c]
-mpcs_parent_items= [c for c in df_ov.columns if c.startswith('MPCSp') and 'sum' not in c]
+hbi_child_items  = [c for c in dfo.columns if c.startswith('HBIc') and 'sum' not in c]
+hbi_parent_items = [c for c in dfo.columns if c.startswith('HBIp') and 'sum' not in c]
+mpcs_child_items = [c for c in dfo.columns if c.startswith('MPCSc') and 'sum' not in c]
+mpcs_parent_items= [c for c in dfo.columns if c.startswith('MPCSp') and 'sum' not in c]
 sum_cols         = ['HBIc_sum', 'HBIp_sum', 'MPCSc_sum', 'MPCSp_sum']
  
 groups = {
@@ -579,7 +650,7 @@ groups = {
 col_rows = []
 for grp_name, cols in groups.items():
     for c in cols:
-        n_miss = int(df_ov[c].isna().sum())
+        n_miss = int(dfo[c].isna().sum())
         col_rows.append({
             'Group'   : grp_name,
             'Column'  : c,
@@ -601,7 +672,7 @@ print("=" * 70)
 print(f"{'Group':<45} {'Items':>5} {'Matrix':>8} {'NaN total':>10} {'% missing':>10}")
 print("-" * 70)
 for grp_name, cols in groups.items():
-    sub    = df_ov[cols]
+    sub    = dfo[cols]
     n_items= len(cols)
     matrix = N * n_items
     n_nan  = int(sub.isna().sum().sum())
@@ -613,7 +684,7 @@ print("\n" + "=" * 70)
 print("PER-ROW MISSING COUNT DISTRIBUTION (how many items missing per participant)")
 print("=" * 70)
 for grp_name, cols in groups.items():
-    row_miss = df_ov[cols].isna().sum(axis=1)
+    row_miss = dfo[cols].isna().sum(axis=1)
     print(f"\n{grp_name}")
     vc = row_miss.value_counts().sort_index()
     # show only counts 0 and >0 collapsed
@@ -633,7 +704,7 @@ for grp_name, cols in groups.items():
 all_cols = sum(groups.values(), [])
 all_cols_unique = list(dict.fromkeys(all_cols))   # preserve order, dedupe
 total_matrix = N * len(all_cols_unique)
-total_nan    = int(df_ov[all_cols_unique].isna().sum().sum())
+total_nan    = int(dfo[all_cols_unique].isna().sum().sum())
 print("\n" + "=" * 70)
 print("GRAND TOTAL (all unique instrument columns combined)")
 print("=" * 70)
