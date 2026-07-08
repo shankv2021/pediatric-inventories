@@ -1,0 +1,12 @@
+{
+    "https://api.shinyapps.io": {
+        "server_url": "https://api.shinyapps.io",
+        "filename": "C:\\Users\\vshas\\Box\\Harmonization\\Pediatric\\Analysis\\app",
+        "app_url": "https://enigma-tools.shinyapps.io/pediatric_inventories_calculator_parent/",
+        "app_id": "17592035",
+        "app_guid": null,
+        "title": "pediatric_inventories_calculator_parent",
+        "app_mode": "python-shiny",
+        "app_store_version": 1
+    }
+}

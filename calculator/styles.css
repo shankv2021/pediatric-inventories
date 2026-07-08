@@ -1,0 +1,137 @@
+
+body {
+    background-color: #F4F4F4;
+    padding: 1rem 1.25rem ;
+    /* font-family:'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif; */
+}
+.container {
+    max-width: 1280px;
+    margin: 0 auto;
+    max-height: 88vh;
+}
+
+.app-heading {
+    font-size:larger;
+    font-weight: bold;
+}
+.file {
+    display: grid;
+    grid-template-columns: repeat(5,1fr);
+    flex-direction: row;
+    gap: 0.5rem;
+    justify-content:space-around;
+    background-color: #FFFFFF;
+    padding: 1rem 1.25rem;
+    margin: 1rem auto;
+    /* box-shadow: 5px 5px 15px 0px rgba(0,0,0,0.2); */
+    box-shadow: 5px 5px 10px 0px rgba(0,0,0,0.1);
+
+    border-radius: 10px;
+}
+
+.select_dropdown {
+    width: 15rem;
+    border-radius: 10px;
+}
+#input_name {
+    border-radius: 12px;
+    align-self: flex-start;
+}
+#output_name {
+    border-radius: 12px;
+    align-self: flex-start;
+}
+table {
+    width: 100%;
+}
+.tables {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    flex-direction: row;
+    gap: 0.75rem;
+    
+    /* justify-content: space-evenly; */
+}
+.table_parent {
+    background-color: #FFFFFF;
+    
+    max-height: 65vh;
+    position: relative;
+    width: 100%;
+    padding: 1rem 1.25rem;
+    /* margin: 1rem auto; */
+    margin-top: 1rem;
+    border: #EEEEEE;
+    border-radius: 10px;
+    overflow: auto;
+    box-shadow: 5px 5px 10px 0px rgba(0,0,0,0.1);
+}
+
+.table_row {
+    display: grid;
+    grid-template-columns: 80% 20%;
+    gap: 0.5rem;
+}
+
+.output_table_row {
+    padding-block: 8px;
+}
+.total_score_row {
+    padding-block: 8px;
+    background-color: #EEEEEE;
+}
+tr {
+    border-bottom: 1px solid rgb(183, 180, 180,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.table_heading {
+    text-align: center;
+}
+.table_title {
+    font-weight:normal;
+    font-size: x-large;
+}
+.table_category {
+    font-weight:bold;
+    font-size: large;
+    padding-block: 8px;
+}
+.table_instr {
+    font-style: italic;
+    text-align: left;
+}
+.output_captions {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.form-group {
+    margin-bottom: 0px;
+    padding-block: 4px;
+}
+.br {
+    line-height: 2px;
+}
+.btn {
+    border-radius: 6px;
+    border: 3px solid black;
+    backface-visibility: hidden;
+    color: black;
+    font-size:medium;
+    font-weight: 400;
+    align-self: flex-end;
+}
+.btn:hover {
+    background-color: #F4F4F4;
+    color: black;
+}
+
+span {
+    font-size: medium;
+    /* text-align:end;
+    padding-left: 1rem;
+    padding-right: 1rem; */
+}
